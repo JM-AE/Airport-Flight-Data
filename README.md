@@ -1,6 +1,8 @@
 # Airport-Flight-Data
 Project dataset containing sample of FR24 data
-adsb - vsriable description 
+
+adsb - variable description 
+
 1. AircraftId: The model or type of the aircraft. In this case, "B738" refers to the Boeing 737-800 model.
 
 
