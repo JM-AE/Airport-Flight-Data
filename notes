@@ -172,4 +172,139 @@ def load_data(url):
     print("#6# DataFrame 1st line #6#")
     df.show(1)
     return df
+##########################################
+import os
+import json
+import requests
+import tempfile
+import urllib
+from urllib.parse import urlparse
+from pyspark.sql import SparkSession
 
+# Initialize Spark
+spark = SparkSession.builder.master("local[*]").appName("DataLoader").getOrCreate()
+
+def load_data(url):
+    # 0 Extract the file name from the URL
+    parsed_url = urlparse(url)
+    file_name = os.path.basename(parsed_url.path)
+
+    # 1 Load data from URL
+    data = download_json_data(url)
+    if data is None:
+        return None  # Exit if download failed
+    
+    # 2 Determine the structure of the data and find keys
+    analyze_json_structure(data)
+
+    # 2.1 Save the file to a temporary location
+    tmp_file_path = save_to_temp_file(url, file_name)
+    if tmp_file_path is None:
+        return None  # Exit if file creation failed
+    
+    # 4 Validate the JSON structure
+    if not validate_json_structure(tmp_file_path):
+        return None  # Exit if validation failed
+    
+    # 5 Load into Spark DataFrame with error handling
+    df = load_spark_dataframe(tmp_file_path)
+    if df is None:
+        return None  # Exit if DataFrame loading failed
+
+    # 6 Show the DataFrame
+    print("#6# DataFrame 1st line #6#")
+    df.show(1)
+    return df
+
+def download_json_data(url):
+    """
+    Downloads the JSON data from the given URL.
+    """
+    response = requests.get(url)
+    file_name = os.path.basename(urlparse(url).path)
+
+    if response.status_code == 200:
+        print(f"#1# {file_name} data successfully loaded #1#")
+        return response.json()
+    else:
+        print(f"#1# Failed to load {file_name}. Status code: {response.status_code} #1#")
+        return None
+
+def analyze_json_structure(data):
+    """
+    Analyze the structure of the JSON data and print a sample.
+    """
+    if isinstance(data, dict):
+        # 2.0.1 Look for keys in the dictionary
+        keys = list(data.keys())
+        print(f"#2.0.1# Top-level keys found: {keys} #2.0.1#")
+        
+        # 2.0.2 If there's a key that is a list, we can sample from it
+        for key in keys:
+            if isinstance(data[key], list):
+                data_sample = data[key][:1]  # Get the first entry
+                for entry in data_sample:
+                    print(f"#2.0.2# Raw Data from key: '{key}' #2.0.2#")
+                    print(f"#2.0.2# Raw Data sample: {json.dumps(entry, indent=4)} #2.0.2#")
+                break
+        else:
+            print("#2.0.2# No list-type keys found in the dictionary. #2.0.2#")
+    
+    elif isinstance(data, list):
+        # 2.0.3 Print sample directly from the list
+        data_sample = data[:1]  # Get the first entry
+        for entry in data_sample:
+            print(f"#2.0.3# Raw Data sample: {json.dumps(entry, indent=4)} #2.0.3#")
+    else:
+        print("#2.0.3# No valid data found. #2.0.3#")
+
+def save_to_temp_file(url, file_name):
+    """
+    Save the content from the URL to a temporary file and return the path.
+    """
+    tmp_file_path = os.path.join(tempfile.gettempdir(), file_name)
+    
+    try:
+        urllib.request.urlretrieve(url, tmp_file_path)
+        if os.path.exists(tmp_file_path):
+            print(f"#3# Temporary file {file_name} exists #3#")
+            return tmp_file_path
+        else:
+            print(f"#3# Temporary file {file_name} does not exist #3#")
+            return None
+    except Exception as e:
+        print(f"#3# Error saving file {file_name}: {str(e)} #3#")
+        return None
+
+def validate_json_structure(file_path):
+    """
+    Validate the structure of the JSON file.
+    """
+    try:
+        with open(file_path, "r") as f:
+            json.load(f)
+        print(f"#4# {os.path.basename(file_path)} is valid #4#")
+        return True
+    except json.JSONDecodeError as e:
+        print(f"#4# Invalid JSON structure: {str(e)} #4#")
+        return False
+
+def load_spark_dataframe(file_path):
+    """
+    Load the JSON data into a Spark DataFrame with error handling.
+    """
+    try:
+        df = spark.read.json(file_path)
+        print("#5# DataFrame loaded successfully (single line option) #5#")
+        return df
+    except Exception as e:
+        print(f"#5# Error loading DataFrame in single line option: {str(e)} #5#")
+        print("#5# Attempting to load DataFrame with multiline option. #5#")
+        
+        try:
+            df = spark.read.option("multiline", "true").json(file_path)
+            print("#5# DataFrame loaded successfully in multiline option #5#")
+            return df
+        except Exception as e:
+            print(f"#5# Error loading DataFrame in multiline option: {str(e)} #5#")
+            return None
