@@ -436,3 +436,57 @@ def load_spark_dataframe(file_path):
         except Exception as e:
             print(f"#5# Error loading DataFrame in multiline option: {str(e)} #5#")
             return None
+from pyspark.sql import functions as F
+from pyspark.sql import types as T
+
+def flatten_df(df, prefix=""):
+    """
+    Recursively flattens a DataFrame. Handles structs (nested fields) and arrays (by exploding them).
+    
+    Args:
+    df: The input DataFrame.
+    prefix: Used to prefix column names to maintain the hierarchy in the flattened structure.
+    
+    Returns:
+    A flattened DataFrame with no nested fields.
+    """
+    flat_cols = []  # Collects all the non-struct/array columns
+    nested_cols = []  # Collects all the struct/array columns for flattening
+    
+    # Loop through all columns in the DataFrame
+    for col_name in df.columns:
+        col = df[col_name]
+        col_type = df.schema[col_name].dataType
+        
+        # Check if the column is a struct (nested)
+        if isinstance(col_type, T.StructType):
+            for field in col_type.fields:
+                nested_cols.append(F.col(f"{col_name}.{field.name}").alias(f"{prefix}{col_name}_{field.name}"))
+        
+        # Check if the column is an array, then explode it
+        elif isinstance(col_type, T.ArrayType):
+            # Explode the array while maintaining the prefix for hierarchical naming
+            df = df.withColumn(col_name, F.explode_outer(F.col(col_name)))
+            nested_cols.append(F.col(col_name).alias(f"{prefix}{col_name}"))
+        
+        # Otherwise, it's a flat column, add it directly
+        else:
+            flat_cols.append(F.col(col_name).alias(f"{prefix}{col_name}"))
+    
+    # Select flat columns
+    df = df.select(flat_cols + nested_cols)
+    
+    # If there are nested fields, recurse on the DataFrame
+    for nested_col in nested_cols:
+        # Check if there are still nested fields in the DataFrame
+        nested_fields = [f for f in df.schema.fields if isinstance(f.dataType, (T.StructType, T.ArrayType))]
+        if nested_fields:
+            # Recursively flatten again if nested fields exist
+            df = flatten_df(df, prefix=f"{prefix}")
+    
+    return df
+########################################
+# Example usage:
+# df is your original dataframe
+flat_df = flatten_df(df)
+flat_df.show(truncate=False)
