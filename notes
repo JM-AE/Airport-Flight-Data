@@ -308,3 +308,131 @@ def load_spark_dataframe(file_path):
         except Exception as e:
             print(f"#5# Error loading DataFrame in multiline option: {str(e)} #5#")
             return None
+###################################
+import requests
+import os
+import json
+import tempfile
+from io import StringIO
+from urllib.parse import urlparse
+from pyspark.sql import SparkSession
+
+# Initialize Spark
+spark = SparkSession.builder.master("local[*]").appName("OptimizedDataLoader").getOrCreate()
+
+def load_data(url):
+    """
+    Optimized function to download data from URL and load it into a Spark DataFrame.
+    """
+    # 0 Extract the file name from the URL
+    file_name = os.path.basename(urlparse(url).path)
+    
+    # 1 Download the data
+    data = stream_download(url)
+    if data is None:
+        return None  # Exit if download failed
+
+    # 2 Analyze the structure (optional if the JSON is large and directly handled by Spark)
+    analyze_json_structure(data)
+    
+    # 3 Try loading into Spark without saving to disk
+    try:
+        df = load_spark_dataframe_from_memory(data)
+        print("#5# DataFrame loaded successfully from memory #5#")
+    except Exception as e:
+        print(f"#5# Error loading DataFrame from memory: {str(e)} #5#")
+        print("#5# Attempting to load DataFrame using file-based approach #5#")
+
+        # Fallback: Save to a temporary file and read into Spark
+        tmp_file_path = save_to_temp_file(data, file_name)
+        if tmp_file_path is None:
+            return None
+
+        # Validate and load the DataFrame from the file
+        df = load_spark_dataframe(tmp_file_path)
+        if df is None:
+            return None  # Exit if DataFrame loading failed
+    
+    # 6 Show the DataFrame
+    print("#6# DataFrame 1st line #6#")
+    df.show(1)
+    return df
+
+def stream_download(url):
+    """
+    Downloads the data from the URL and returns it as a string (JSON) for further processing.
+    """
+    try:
+        response = requests.get(url, stream=True)
+        if response.status_code == 200:
+            print(f"#1# Data from {url} successfully loaded #1#")
+            return response.text  # Return the raw JSON data as string
+        else:
+            print(f"#1# Failed to load {url}. Status code: {response.status_code} #1#")
+            return None
+    except requests.RequestException as e:
+        print(f"#1# Error while downloading data from {url}: {str(e)} #1#")
+        return None
+
+def analyze_json_structure(data):
+    """
+    Analyzes the structure of the JSON data (string) and prints a sample.
+    """
+    try:
+        json_data = json.loads(data)
+        if isinstance(json_data, dict):
+            keys = list(json_data.keys())
+            print(f"#2.0.1# Top-level keys found: {keys} #2.0.1#")
+        elif isinstance(json_data, list):
+            print(f"#2.0.3# Sample data from the list: {json.dumps(json_data[:1], indent=4)} #2.0.3#")
+        else:
+            print("#2.0.3# No valid data structure found. #2.0.3#")
+    except json.JSONDecodeError:
+        print("#2.0.3# Failed to parse JSON structure. Skipping analysis. #2.0.3#")
+
+def save_to_temp_file(data, file_name):
+    """
+    Saves the JSON string to a temporary file and returns the file path.
+    """
+    try:
+        tmp_file_path = os.path.join(tempfile.gettempdir(), file_name)
+        with open(tmp_file_path, "w") as f:
+            f.write(data)
+        print(f"#3# Temporary file {file_name} saved #3#")
+        return tmp_file_path
+    except Exception as e:
+        print(f"#3# Error saving temporary file {file_name}: {str(e)} #3#")
+        return None
+
+def load_spark_dataframe_from_memory(data):
+    """
+    Loads the JSON data into a Spark DataFrame from an in-memory string.
+    """
+    try:
+        # Use StringIO to convert string to a file-like object
+        json_rdd = spark.sparkContext.parallelize([data])
+        df = spark.read.json(json_rdd)
+        return df
+    except Exception as e:
+        print(f"#5# Error loading DataFrame from memory: {str(e)} #5#")
+        raise e  # Re-raise the exception for the calling function to handle
+
+def load_spark_dataframe(file_path):
+    """
+    Loads the JSON data from a file into a Spark DataFrame with error handling.
+    """
+    try:
+        df = spark.read.json(file_path)
+        print("#5# DataFrame loaded successfully from file #5#")
+        return df
+    except Exception as e:
+        print(f"#5# Error loading DataFrame from file: {str(e)} #5#")
+        print("#5# Attempting to load DataFrame using multiline option #5#")
+        
+        try:
+            df = spark.read.option("multiline", "true").json(file_path)
+            print("#5# DataFrame loaded successfully in multiline option #5#")
+            return df
+        except Exception as e:
+            print(f"#5# Error loading DataFrame in multiline option: {str(e)} #5#")
+            return None
