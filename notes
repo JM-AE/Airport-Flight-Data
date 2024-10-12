@@ -1,0 +1,175 @@
+from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql import types as T
+import json
+
+# Sample data
+data = [
+    {
+        "carrier": {
+            "iata": "KE",
+            "icao": "KAL"
+        },
+        "flightNumber": 476,
+        "departure": {
+            "airport": {
+                "iata": "SGN",
+                "icao": "VVTS"
+            },
+            "terminal": "2",
+            "date": {
+                "local": "2023-10-03",
+                "utc": "2023-10-02"
+            },
+            "time": {
+                "local": "00:15",
+                "utc": "17:15"
+            }
+        },
+        "arrival": {
+            "airport": {
+                "iata": "ICN",
+                "icao": "RKSI"
+            },
+            "terminal": "2",
+            "date": {
+                "local": "2023-10-03",
+                "utc": "2023-10-02"
+            },
+            "time": {
+                "local": "07:20",
+                "utc": "22:20"
+            }
+        },
+        "elapsedTime": 305,
+        "codeshare": {
+            "cockpitCrewEmployer": {
+                "code": "KE",
+                "name": "",
+                "number": "4"
+            },
+            "marketingFlights": [
+                {"code": "DL", "serviceNumber": "7926"},
+                {"code": "VN", "serviceNumber": "3400"},
+                {"code": "VS", "serviceNumber": "5520"}
+            ]
+        }
+    }
+    # Add more records as necessary
+]
+
+# Initialize Spark
+spark = SparkSession.builder.master("local[*]").appName("Flatten JSON").getOrCreate()
+
+# Convert the list of dictionaries into a DataFrame
+df = spark.read.json(spark.sparkContext.parallelize([json.dumps(data)]))
+
+# Function to flatten nested structure
+def flatten_df(df, prefix=None):
+    # Loop over columns, checking for structs (nested fields) or arrays
+    for col_name in df.columns:
+        col = df[col_name]
+        if isinstance(df.schema[col_name].dataType, T.StructType):
+            # If it's a Struct, expand it
+            df = df.select("*", F.col(f"{col_name}.*"))
+            df = df.drop(col_name)
+        elif isinstance(df.schema[col_name].dataType, T.ArrayType):
+            # If it's an Array, explode it
+            df = df.withColumn(col_name, F.explode_outer(col))
+    return df
+
+# Call the flatten function
+flat_df = flatten_df(df)
+
+# Show the result
+flat_df.show(truncate=False)
+#####################################################################
+def load_data(url):
+
+    # 0 Extract the file name from the URL
+    parsed_url = urlparse(url)
+    file_name = os.path.basename(parsed_url.path)
+    
+    # 1 Load data from URL
+    response = requests.get(url)
+
+    if response.status_code == 200:
+        data = response.json()
+        print(f"#1# {file_name} data successfully loaded #1#")
+    else:
+        print(f"#1# Failed to load {file_name}. Status code: {response.status_code} #1#")
+        return None  
+    
+    # 2 Determine the structure of the data and find keys
+    if isinstance(data, dict):
+    
+    # 2.0.1 Look for keys in the dictionary
+        keys = list(data.keys())
+        print(f"#2.0.1#Top-level keys found: {keys}#2.0.1#")
+        
+    # 2.0.2 If there's a key that is a list, we can sample from it
+        for key in keys:
+            if isinstance(data[key], list):
+                data_sample = data[key][:1]  # NOTE: Get entry
+                for entry in data_sample:
+                    print(f"#2.0.2# Raw Data from key: '{key}'#2.0.2#")
+                    print(f"#2.0.2# Raw Data sample: {json.dumps(entry, indent=4)} #2.0.2#")
+                break
+        else:
+            print("#2.0.2# No list-type keys found in the dictionary.#2.0.2#")
+    
+    elif isinstance(data, list):
+    
+    #2.0.3 Print sample directly from the list
+        data_sample = data[:1]  # NOTE: Get entry
+        for entry in data_sample:
+            print(f"#2.0.3# Raw Data: sample: {json.dumps(entry, indent=4)} #2.0.3#")
+    
+    else:
+        print("#2.0.3# No valid data found. #2.0.3#")
+
+    # 2.1 Create a temporary file with a name based on the URL 
+    tmp_file_path = os.path.join(tempfile.gettempdir(), file_name)
+    urllib.request.urlretrieve(url, tmp_file_path)
+
+    # 3 Check temporary file
+    if os.path.exists(tmp_file_path):
+        print(f"#3# Temporary file {file_name} exists #3#")
+    else:
+        print(f"#3# Temporary file {file_name} does not exist #3#")
+        return None
+    
+    # 4 Validate the JSON structure
+    try:
+        with open(tmp_file_path, "r") as f:
+            data = json.load(f)
+            print(f"#4# {file_name} is valid #4#")
+    except json.JSONDecodeError as e:
+        print(f"#4# Invalid {file_name} structure: #4#")
+        print(f"#4# {str(e)} #4#") # NOTE:exeption message
+        return None
+
+    # 5 Load into Spark DataFrame with error handling
+    try:
+        df = spark.read.json(tmp_file_path)
+        df.show(1)
+    
+    except Exception as w:
+        print("#5# Error loading DataFrame in single line option: #5#")
+        print(f"#5# {str(w)} #5#") # NOTE:exeption message
+        print("#5# Attempting to load DataFrame in multi line option. #5#")
+        
+        try:
+            df = spark.read.option("multiline", "true").json(tmp_file_path)
+            print("#5# DataFrame loaded successfully in multiline option #5#")
+        except Exception as q:
+            print("#5# Error loading DataFrame in multiline option: #5#")
+            print(f"#5# {str(q)} #5#") # NOTE:exeption message
+            return None
+    
+
+    # 6 Show the DataFrame
+    print("#6# DataFrame 1st line #6#")
+    df.show(1)
+    return df
+
