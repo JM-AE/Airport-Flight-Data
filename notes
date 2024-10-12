@@ -490,3 +490,131 @@ def flatten_df(df, prefix=""):
 # df is your original dataframe
 flat_df = flatten_df(df)
 flat_df.show(truncate=False)
+#########################################
+
+from pyspark.sql import functions as F
+from pyspark.sql.types import StringType, DoubleType
+
+def clean_data(df):
+    """
+    Cleans a DataFrame by handling missing values, fixing data types, and removing constant columns.
+    
+    Args:
+    df: The input Spark DataFrame.
+    
+    Returns:
+    A cleaned DataFrame.
+    """
+    # 1. Handle Missing Values (NaN, empty strings, zeros)
+    df = handle_missing_values(df)
+    
+    # 2. Fix Mixed Data Types (e.g., strings and numbers in the same column)
+    df = fix_mixed_data_types(df)
+    
+    # 3. Drop Columns with Constant Values
+    df = drop_constant_columns(df)
+    
+    return df
+
+def handle_missing_values(df):
+    """
+    Replaces NaN, empty strings, and zeros with None (null).
+    
+    Args:
+    df: The input Spark DataFrame.
+    
+    Returns:
+    DataFrame with missing values handled.
+    """
+    # Replace empty strings and 0s with None
+    df = df.replace("", None).replace(0, None)
+    
+    # Optionally, you can drop rows with null values (or use fillna() to replace them with default values)
+    df = df.na.drop()  # Drops rows with any null values
+    
+    return df
+
+def fix_mixed_data_types(df):
+    """
+    Detects and fixes columns with mixed data types (e.g., numbers as strings) in a DataFrame.
+    
+    Args:
+    df: The input Spark DataFrame.
+    
+    Returns:
+    DataFrame with consistent data types.
+    """
+    for col in df.columns:
+        # Detect if the column has mixed types (e.g., strings and numbers)
+        if df.select(col).dtypes[0][1] == 'string':
+            # Attempt to convert strings to numbers where applicable
+            df = df.withColumn(col, F.when(F.col(col).cast(DoubleType()).isNotNull(), F.col(col).cast(DoubleType())).otherwise(F.col(col)))
+    return df
+
+def drop_constant_columns(df):
+    """
+    Detects and removes columns with constant values (i.e., all values are the same).
+    
+    Args:
+    df: The input Spark DataFrame.
+    
+    Returns:
+    DataFrame without constant-value columns.
+    """
+    for col in df.columns:
+        distinct_count = df.select(F.countDistinct(col)).collect()[0][0]
+        if distinct_count == 1:
+            df = df.drop(col)
+            print(f"Column '{col}' has constant values and was dropped.")
+    
+    return df
+
+def transform_string_case(df, to_upper=True):
+    """
+    Transforms all string columns to either uppercase or lowercase.
+    
+    Args:
+    df: The input Spark DataFrame.
+    to_upper: If True, converts strings to uppercase, otherwise to lowercase.
+    
+    Returns:
+    DataFrame with transformed string columns.
+    """
+    for col, dtype in df.dtypes:
+        if dtype == 'string':
+            if to_upper:
+                df = df.withColumn(col, F.upper(F.col(col)))
+            else:
+                df = df.withColumn(col, F.lower(F.col(col)))
+    return df
+
+def report_data_issues(df):
+    """
+    Prints a report of data issues: mixed types, columns with nulls, and constant-value columns.
+    
+    Args:
+    df: The input Spark DataFrame.
+    """
+    print("# Data Issues Report #")
+    
+    # 1. Mixed types detection
+    print("Columns with mixed types:")
+    for col in df.columns:
+        if df.select(col).dtypes[0][1] == 'string':
+            mixed_type_count = df.select(col).filter(F.col(col).cast(DoubleType()).isNotNull()).count()
+            if mixed_type_count > 0:
+                print(f" - {col} contains mixed strings and numbers.")
+    
+    # 2. Columns with nulls
+    print("\nColumns with null values:")
+    for col in df.columns:
+        null_count = df.filter(F.col(col).isNull()).count()
+        if null_count > 0:
+            print(f" - {col} has {null_count} null values.")
+    
+    # 3. Constant-value columns
+    print("\nColumns with constant values:")
+    for col in df.columns:
+        distinct_count = df.select(F.countDistinct(col)).collect()[0][0]
+        if distinct_count == 1:
+            print(f" - {col} contains only one unique value.")
