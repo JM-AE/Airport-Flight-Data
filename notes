@@ -870,3 +870,79 @@ df = fix_time_format_columns(df, time_columns_info['time_format_columns'])
 
 # Show the updated DataFrame
 df.show(truncate=False)
+##############################
+def count_delayed_departures(df):
+    """
+    Counts the number of delayed departures.
+    
+    Args:
+    df: The input flattened Spark DataFrame.
+    
+    Returns:
+    A DataFrame showing the count of delayed departures per airport.
+    """
+    # Check if the departure delay is non-zero and count those
+    delayed_departures = df.filter(F.col("departure_actualTime_outGateVariation").isNotNull()) \
+                           .filter(F.col("departure_actualTime_outGateVariation") > 0) \
+                           .groupBy("departure_airport_iata") \
+                           .agg(F.count("*").alias("number_of_delayed_departures"))
+    
+    return delayed_departures
+#######################
+def total_departure_delay_minutes(df):
+    """
+    Calculates the total minutes of delay for departures.
+    
+    Args:
+    df: The input flattened Spark DataFrame.
+    
+    Returns:
+    A DataFrame showing the total delay in minutes for departures per airport.
+    """
+    # Extract delay duration in HH:MM:SS format and convert it to minutes
+    departure_delay = df.filter(F.col("departure_actualTime_outGateVariation").isNotNull()) \
+                        .withColumn("departure_delay_minutes", 
+                                    F.expr("substring(departure_actualTime_outGateVariation, 4, 2)").cast("int") * 60 + 
+                                    F.expr("substring(departure_actualTime_outGateVariation, 7, 2)").cast("int")) \
+                        .groupBy("departure_airport_iata") \
+                        .agg(F.sum("departure_delay_minutes").alias("total_departure_delay_minutes"))
+    
+    return departure_delay
+#########################
+def count_delayed_arrivals(df):
+    """
+    Counts the number of delayed arrivals.
+    
+    Args:
+    df: The input flattened Spark DataFrame.
+    
+    Returns:
+    A DataFrame showing the count of delayed arrivals per airport.
+    """
+    # Check if the arrival delay is non-zero and count those
+    delayed_arrivals = df.filter(F.col("arrival_actualTime_inGateVariation").isNotNull()) \
+                         .filter(F.col("arrival_actualTime_inGateVariation") > 0) \
+                         .groupBy("arrival_airport_iata") \
+                         .agg(F.count("*").alias("number_of_delayed_arrivals"))
+    
+    return delayed_arrivals
+############################
+def total_arrival_delay_minutes(df):
+    """
+    Calculates the total minutes of delay for arrivals.
+    
+    Args:
+    df: The input flattened Spark DataFrame.
+    
+    Returns:
+    A DataFrame showing the total delay in minutes for arrivals per airport.
+    """
+    # Extract delay duration in HH:MM:SS format and convert it to minutes
+    arrival_delay = df.filter(F.col("arrival_actualTime_inGateVariation").isNotNull()) \
+                      .withColumn("arrival_delay_minutes", 
+                                  F.expr("substring(arrival_actualTime_inGateVariation, 4, 2)").cast("int") * 60 + 
+                                  F.expr("substring(arrival_actualTime_inGateVariation, 7, 2)").cast("int")) \
+                      .groupBy("arrival_airport_iata") \
+                      .agg(F.sum("arrival_delay_minutes").alias("total_arrival_delay_minutes"))
+    
+    return arrival_delay
