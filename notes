@@ -778,3 +778,95 @@ total_departure_delay, total_arrival_delay = calculate_total_delay_per_airport(d
 # Show the results
 total_departure_delay.show(truncate=False)
 total_arrival_delay.show(truncate=False)
+########################################
+import pyspark.sql.functions as F
+from pyspark.sql.types import StringType, LongType
+
+def identify_time_columns(df):
+    """
+    Identifies columns with time-related data: UNIX timestamp columns and time-like (HH:MM:SS) columns.
+    
+    Args:
+    df: The input Spark DataFrame.
+    
+    Returns:
+    A dictionary with two keys: 
+    - 'unix_columns' for columns with UNIX timestamps,
+    - 'time_format_columns' for columns with time-like formats (HH:MM:SS).
+    """
+    unix_timestamp_cols = []
+    time_format_cols = []
+    
+    # 1. Identify UNIX timestamp columns (usually numeric fields in seconds since 1970)
+    for col, dtype in df.dtypes:
+        if dtype in ['long', 'int']:
+            # Check if the numeric value falls into the plausible range of UNIX timestamps
+            min_value = df.select(F.min(col)).collect()[0][0]
+            max_value = df.select(F.max(col)).collect()[0][0]
+            
+            # UNIX timestamps should be within a certain range, e.g., between 1970 and a plausible year
+            if min_value and max_value and (min_value > 0 and max_value > 1_000_000_000):  # After 1970
+                unix_timestamp_cols.append(col)
+    
+    # 2. Identify time format columns (e.g., HH:MM:SS format)
+    for col, dtype in df.dtypes:
+        if dtype == 'string':
+            # Check if the column contains values in the format HH:MM:SS
+            sample_value = df.select(col).where(F.col(col).isNotNull()).limit(1).collect()
+            if sample_value and len(sample_value) > 0 and ":" in sample_value[0][0]:
+                time_format_cols.append(col)
+    
+    print(f"Identified UNIX timestamp columns: {unix_timestamp_cols}")
+    print(f"Identified time format columns (e.g., HH:MM:SS): {time_format_cols}")
+    
+    return {
+        'unix_columns': unix_timestamp_cols,
+        'time_format_columns': time_format_cols
+    }
+
+def convert_unix_time_columns(df, unix_columns):
+    """
+    Converts columns with UNIX timestamps into a human-readable format (yyyy-MM-dd HH:mm:ss).
+    
+    Args:
+    df: The input Spark DataFrame.
+    unix_columns: A list of columns that store UNIX timestamps.
+    
+    Returns:
+    A DataFrame with the UNIX timestamp columns converted to human-readable format.
+    """
+    for col in unix_columns:
+        print(f"Converting column '{col}' from UNIX timestamp to human-readable format.")
+        df = df.withColumn(col, F.from_unixtime(F.col(col), "yyyy-MM-dd HH:mm:ss"))
+    return df
+
+def fix_time_format_columns(df, time_format_columns):
+    """
+    Fixes inconsistencies in columns with time-like data (e.g., HH:MM:SS format).
+    This is a placeholder function for now, which can be extended if needed.
+    
+    Args:
+    df: The input Spark DataFrame.
+    time_format_columns: A list of columns that store time in formats like HH:MM:SS.
+    
+    Returns:
+    The DataFrame, possibly with standardized time formats.
+    """
+    for col in time_format_columns:
+        print(f"Column '{col}' is already in time format (e.g., HH:MM:SS).")
+        # Currently, we're not converting HH:MM:SS format. If required, add more logic here.
+    return df
+
+# Example workflow combining the three functions:
+
+# Step 1: Identify time-related columns
+time_columns_info = identify_time_columns(df)
+
+# Step 2: Convert UNIX timestamp columns to human-readable format
+df = convert_unix_time_columns(df, time_columns_info['unix_columns'])
+
+# Step 3: Fix time format columns if necessary (e.g., handle mixed formats)
+df = fix_time_format_columns(df, time_columns_info['time_format_columns'])
+
+# Show the updated DataFrame
+df.show(truncate=False)
