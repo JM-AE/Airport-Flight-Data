@@ -721,3 +721,60 @@ mixed_data_patterns = identify_mixed_data_patterns(cleaned_df)
 
 # Report data issues like mixed types, nulls, and constant-value columns
 report_data_issues(cleaned_df)
+###########################################
+
+from pyspark.sql import functions as F
+
+def calculate_total_delay_per_airport(df):
+    """
+    Calculate the total delay in minutes for both departures and arrivals by airport.
+    
+    Args:
+    df: The input DataFrame containing flight data.
+    
+    Returns:
+    Two DataFrames:
+    - Total departure delay per airport.
+    - Total arrival delay per airport.
+    """
+    
+    # 1. Extract relevant fields for departure delays (outGateVariation) and airport
+    df_departure_delays = df.select(
+        F.col("departure.airport.iata").alias("departure_airport"),
+        F.col("statusDetails.departure.actualTime.outGateVariation").alias("departure_delay")
+    )
+    
+    # 2. Extract relevant fields for arrival delays (inGateVariation) and airport
+    df_arrival_delays = df.select(
+        F.col("arrival.airport.iata").alias("arrival_airport"),
+        F.col("statusDetails.arrival.actualTime.inGateVariation").alias("arrival_delay")
+    )
+    
+    # 3. Convert delay fields to minutes (if the delay is in the format "HH:MM:SS")
+    df_departure_delays = df_departure_delays.withColumn(
+        "departure_delay_minutes", 
+        F.expr("substring(departure_delay, 4, 2)").cast("int") * 60 + F.expr("substring(departure_delay, 7, 2)").cast("int")
+    )
+    
+    df_arrival_delays = df_arrival_delays.withColumn(
+        "arrival_delay_minutes", 
+        F.expr("substring(arrival_delay, 4, 2)").cast("int") * 60 + F.expr("substring(arrival_delay, 7, 2)").cast("int")
+    )
+    
+    # 4. Group by airport and sum the delays
+    total_departure_delay = df_departure_delays.groupBy("departure_airport").agg(
+        F.sum("departure_delay_minutes").alias("total_departure_delay")
+    )
+    
+    total_arrival_delay = df_arrival_delays.groupBy("arrival_airport").agg(
+        F.sum("arrival_delay_minutes").alias("total_arrival_delay")
+    )
+    
+    return total_departure_delay, total_arrival_delay
+
+# Assume df is the DataFrame created from omg.json
+total_departure_delay, total_arrival_delay = calculate_total_delay_per_airport(df)
+
+# Show the results
+total_departure_delay.show(truncate=False)
+total_arrival_delay.show(truncate=False)
