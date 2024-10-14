@@ -1,5 +1,75 @@
+from pyspark.sql import functions as F
+from pyspark.sql import types as T
 
+def flatten_df_with_schema(df):
+    """
+    Flattens a DataFrame based on its schema. Uses schema inspection to guide the flattening process.
+    
+    Args:
+    df: The input DataFrame.
+    
+    Returns:
+    A flattened DataFrame with no nested fields.
+    """
+    # Get the initial schema to guide the flattening process
+    def extract_schema_fields(schema, prefix=""):
+        flat_columns = []  # Holds flat columns (non-nested)
+        struct_columns = []  # Holds struct columns to be flattened
+        array_columns = []  # Holds array columns to be exploded
+        
+        for field in schema:
+            field_name = field.name
+            field_type = field.dataType
+            
+            if isinstance(field_type, T.StructType):
+                # Struct field, needs flattening
+                struct_columns.append((f"{prefix}{field_name}", field_type))
+            elif isinstance(field_type, T.ArrayType):
+                # Array field, needs to be exploded
+                array_columns.append((f"{prefix}{field_name}", field_type))
+            else:
+                # Flat field, keep it as is
+                flat_columns.append(f"{prefix}{field_name}")
+        
+        return flat_columns, struct_columns, array_columns
 
+    def flatten(df, schema, prefix=""):
+        flat_cols, struct_cols, array_cols = extract_schema_fields(schema, prefix)
+        
+        # 1. Select the flat columns (non-struct, non-array)
+        df = df.select([F.col(col).alias(col) for col in flat_cols])
+        
+        # 2. Flatten structs
+        for col_name, col_type in struct_cols:
+            # Flatten each struct by selecting its subfields
+            for field in col_type.fields:
+                df = df.withColumn(f"{col_name}_{field.name}", F.col(f"{col_name}.{field.name}"))
+            # Drop the original struct column
+            df = df.drop(col_name)
+        
+        # 3. Explode arrays (only for arrays of structs or arrays with > 1 element)
+        for col_name, col_type in array_cols:
+            if isinstance(col_type.elementType, T.StructType):
+                # Explode arrays of structs
+                df = df.withColumn(col_name, F.explode_outer(F.col(col_name)))
+                # After explosion, recursively flatten the struct inside the array
+                df = flatten(df, col_type.elementType, prefix=f"{col_name}_")
+        
+        # 4. If more nested structs remain, recurse
+        nested_fields = [f for f in df.schema.fields if isinstance(f.dataType, (T.StructType, T.ArrayType))]
+        if nested_fields:
+            df = flatten(df, df.schema)
+        
+        return df
+
+    # Start the recursive flattening based on schema
+    return flatten(df, df.schema)
+
+# Example usage with a JSON DataFrame
+# df = spark.read.json("path_to_json_file")
+# df_flattened = flatten_df_with_schema(df)
+# df_flattened.show(truncate=False)
+#################
 from pyspark.sql import functions as F
 from pyspark.sql import types as T
 
