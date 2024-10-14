@@ -1,3 +1,73 @@
+
+
+from pyspark.sql import functions as F
+from pyspark.sql import types as T
+
+def flatten_df(df, prefix=""):
+    """
+    Recursively flattens a nested DataFrame. This version carefully handles arrays to avoid creating fake rows.
+    
+    Args:
+    df: The input DataFrame.
+    prefix: A string used to prefix column names, to preserve hierarchy.
+    
+    Returns:
+    A flattened DataFrame with no nested fields.
+    """
+    flat_cols = []  # Collects all the non-struct/array columns
+    nested_cols = []  # Collects all the struct/array columns for flattening
+    
+    # Loop through all columns in the DataFrame
+    for col_name in df.columns:
+        col = df[col_name]
+        col_type = df.schema[col_name].dataType
+        
+        # Check if the column is a struct (nested)
+        if isinstance(col_type, T.StructType):
+            for field in col_type.fields:
+                nested_cols.append(F.col(f"{col_name}.{field.name}").alias(f"{prefix}{col_name}_{field.name}"))
+                
+        # Check if the column is an array, but avoid unnecessary explosion
+        elif isinstance(col_type, T.ArrayType):
+            # Only explode if the array contains more than one element
+            df = df.withColumn(col_name, F.expr(f"filter({col_name}, x -> x is not null)"))  # Clean nulls inside arrays
+            if df.select(F.size(F.col(col_name)).alias("size")).filter(F.col("size") > 1).count() > 0:
+                # Explode the array only if it contains more than one element
+                df = df.withColumn(col_name, F.explode_outer(F.col(col_name)))
+                nested_cols.append(F.col(col_name).alias(f"{prefix}{col_name}"))
+            else:
+                # If the array has 0 or 1 element, treat it as a normal column
+                flat_cols.append(F.col(col_name).alias(f"{prefix}{col_name}"))
+        
+        # Otherwise, it's a flat column, add it directly
+        else:
+            flat_cols.append(F.col(col_name).alias(f"{prefix}{col_name}"))
+           
+    # Select flat columns
+    df = df.select(flat_cols + nested_cols)
+    
+    # If there are nested fields, recurse on the DataFrame
+    for nested_col in nested_cols:
+        # Check if there are still nested fields in the DataFrame
+        nested_fields = [f for f in df.schema.fields if isinstance(f.dataType, (T.StructType, T.ArrayType))]
+        if nested_fields:
+            # Recursively flatten again if nested fields exist
+            df = flatten_df(df, prefix=f"{prefix}")
+    
+    return df
+
+# Example usage with your JSON data loaded into a DataFrame:
+# df = spark.read.json("path_to_json_file")
+# df_flattened = flatten_df(df)
+# df_flattened.show(truncate=False)
+
+
+
+
+
+
+####################################№
+
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql import types as T
