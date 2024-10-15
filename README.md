@@ -1,5 +1,43 @@
-# Airport-Flight-Data
-Project dataset containing sample of FR24 data
+Airport Flight Data
+
+Project Overview
+
+This project involves processing and analyzing airport and flight data using Apache Spark, specifically utilizing datasets from ADS-B and OAG.
+
+Objective
+Develop a scalable solution for ingesting, cleaning, and analyzing large-scale airport and flight datasets in real-time.
+
+Datasets
+
+adsb.json: Contains data from ADS-B sources, including aircraft details and flight paths.
+oag.json: Includes flight schedules, carrier information, and status updates.
+
+Tasks
+Data Loading: Load the datasets from adsb.json and oag.json.
+Data Processing: Utilize Apache Spark for data cleaning, aggregation, and transformation.
+Analysis: Compute key performance indicators (KPIs) such as:
+Average speed for each airport.
+Total number of delayed flights (categorized by arrival and departure).
+Data Description
+
+ADS-B Data
+
+AircraftId: Model/type of the aircraft (e.g., "B738").
+Latitude/Longitude: Current geographical coordinates.
+Altitude: Current altitude in feet.
+Speed: Ground speed in knots.
+Flight: Flight number (e.g., "AAL476").
+Origin/Destination: ICAO codes of departure and arrival airports.
+
+OAG Data
+
+Carrier: IATA and ICAO codes for airlines.
+Flight Number: Numerical portion of the flight number.
+Departure: Airport, date, and time details for departures.
+Arrival: Airport, date, and time details for arrivals.
+Status: Flight status information.
+
+
 
 adsb - variable description 
 
