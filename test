@@ -1,0 +1,62 @@
+from pyspark.sql import functions as F
+from pyspark.sql import types as T
+
+def flatten_with_single_explode(df):
+    """
+    Flattens a DataFrame with nested StructType and ArrayType fields.
+    Applies 'explode' only once using array_zip and avoids row multiplication.
+    
+    Args:
+    df: The input Spark DataFrame with nested fields.
+    
+    Returns:
+    A flattened DataFrame with all nested fields handled appropriately.
+    """
+    
+    # Step 1: Identify all array columns and struct columns
+    array_columns = []
+    struct_columns = []
+    
+    for field in df.schema.fields:
+        field_name = field.name
+        field_type = field.dataType
+        
+        if isinstance(field_type, ArrayType):
+            array_columns.append(field_name)
+        elif isinstance(field_type, StructType):
+            struct_columns.append(field_name)
+
+    # Step 2: Use array_zip to zip all array columns into a single array structure
+    if array_columns:
+        zipped_array_col = F.array_zip(*[F.col(col) for col in array_columns])
+        df = df.withColumn("zipped_array", zipped_array_col)
+        # Explode the zipped array (just once)
+        df = df.withColumn("zipped_array_exploded", F.explode_outer("zipped_array"))
+        # Remove original array columns and the zipped array column
+        df = df.drop(*array_columns).drop("zipped_array")
+    
+    # Step 3: Flatten structs and handle nested fields using expr
+    def flatten_structs(schema, prefix=""):
+        flat_fields = []
+        for field in schema:
+            col_name = field.name
+            col_type = field.dataType
+            
+            if isinstance(col_type, StructType):
+                for nested_field in col_type.fields:
+                    nested_col_name = f"{prefix}{col_name}_{nested_field.name}"
+                    flat_fields.append(F.expr(f"{col_name}.{nested_field.name}").alias(nested_col_name))
+            else:
+                flat_fields.append(F.col(f"{prefix}{col_name}").alias(f"{prefix}{col_name}"))
+        return flat_fields
+    
+    # Step 4: Apply the flattening for structs
+    flat_fields = flatten_structs(df.schema, prefix="")
+    df = df.select(*flat_fields)
+    
+    return df
+
+# Example usage with a JSON DataFrame
+# df = spark.read.json("path_to_json_file")
+# df_flattened = flatten_with_single_explode(df)
+# df_flattened.show(truncate=False)
