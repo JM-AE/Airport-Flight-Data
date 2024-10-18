@@ -1,0 +1,61 @@
+from pyspark.sql.functions import col, explode, arrays_zip, expr
+
+def flatten_complex_json(df):
+    """
+    Flattens a complex nested JSON DataFrame with structs and arrays, avoiding row multiplication.
+    Handles arrays of structs by zipping them and exploding only once.
+    
+    Args:
+    df: The input DataFrame with complex nested fields.
+
+    Returns:
+    A fully flattened DataFrame.
+    """
+
+    # Step 1: Identify array columns and struct columns
+    array_columns = []
+    struct_columns = []
+
+    for field in df.schema.fields:
+        field_name = field.name
+        field_type = field.dataType
+
+        if isinstance(field_type, T.ArrayType):
+            array_columns.append(field_name)
+        elif isinstance(field_type, T.StructType):
+            struct_columns.append(field_name)
+
+    # Step 2: Zip arrays together if any arrays exist, and explode only once
+    if array_columns:
+        zipped_array_name = "zipped_array"
+        df = df.withColumn(zipped_array_name, arrays_zip(*[col(c) for c in array_columns]))
+        df = df.withColumn("exploded_array", explode(col(zipped_array_name)))
+        df = df.drop(*array_columns, zipped_array_name)
+
+    # Step 3: Flatten struct columns using 'expr'
+    for struct_col in struct_columns:
+        # Recursively flatten struct fields
+        for field in df.schema[struct_col].dataType.fields:
+            field_name = field.name
+            df = df.withColumn(f"{struct_col}_{field_name}", col(f"{struct_col}.{field_name}"))
+        df = df.drop(struct_col)
+
+    # Step 4: Handle nested structs and fields inside arrays using 'expr'
+    nested_fields = [f for f in df.schema.fields if isinstance(f.dataType, (T.StructType, T.ArrayType))]
+    for field in nested_fields:
+        field_name = field.name
+        field_type = field.dataType
+
+        # For any remaining struct fields, flatten them recursively
+        if isinstance(field_type, T.StructType):
+            for subfield in field_type.fields:
+                df = df.withColumn(f"{field_name}_{subfield.name}", expr(f"{field_name}.{subfield.name}"))
+            df = df.drop(field_name)
+
+    return df
+
+
+# Example usage:
+# df = spark.read.json("path_to_json_file")
+# df_flattened = flatten_complex_json(df)
+# df_flattened.show(truncate=False)
